@@ -1,7 +1,7 @@
 import gym 
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import DummyVecEnv
-from stable_baselines3.common.evaluation import evaluate_policy
+# from stable_baselines3 import PPO
+# from stable_baselines3.common.vec_env import DummyVecEnv
+# from stable_baselines3.common.evaluation import evaluate_policy
 
 import torch
 from torch.autograd import Function
@@ -16,86 +16,107 @@ import numpy as np
 import qiskit
 from qiskit import transpile, assemble
 from qiskit.visualization import *
-
-class QuantumCircuit:
+import qiskit_machine_learning
+from qiskit_machine_learning.neural_networks import SamplerQNN,CircuitQNN
+from qiskit_machine_learning.connectors import TorchConnector
+class qrlPQC:
     """ 
     This class provides a simple interface for interaction 
     with the quantum circuit 
     """
     
-    def __init__(self, n_qubits, obs, backend, shots):
-        # --- Convert Data ---
-        beta0 = math.atan(obs[0])
-        beta1 = math.atan(obs[1])
-        beta2 = math.atan(obs[2])
-        beta3 = math.atan(obs[3])
+    def __init__(self, n_qubits, shots):
         
         # --- Circuit definition ---
-        self._circuit = qiskit.QuantumCircuit(n_qubits)
+        self.circuit = qiskit.QuantumCircuit(n_qubits)
         
         all_qubits = [i for i in range(n_qubits)]
         self.theta = qiskit.circuit.Parameter('theta')
+        self.beta = qiskit.circuit.ParameterVector('beta', 3)
+        self.circuit.h(all_qubits)
+        self.circuit.barrier()
         
-        self._circuit.h(all_qubits)
-        self._circuit.barrier()
+        self.circuit.rz(self.beta[0], all_qubits)
+        self.circuit.ry(self.beta[1], all_qubits)
+        self.circuit.rz(self.beta[2], all_qubits)
+        self.circuit.barrier()
         
-        self._circuit.rz(beta1, all_qubits)
-        self._circuit.ry(beta2, all_qubits)
-        self._circuit.rz(beta3, all_qubits)
-        self._circuit.barrier()
-        
-        self._circuit.rz(self.theta, all_qubits)
+        self.circuit.rz(self.theta, all_qubits)
         
         
-        self._circuit.measure_all()
+        self.circuit.measure_all()
         # ---------------------------
 
-        self.backend = backend
         self.shots = shots
     
-    def run(self, thetas):
-        t_qc = transpile(self._circuit,
-                         self.backend)
-        qobj = assemble(t_qc,
-                        shots=self.shots,
-                        parameter_binds = [{self.theta: theta} for theta in thetas])
-        job = self.backend.run(qobj)
-        result = job.result().get_counts()
+    # def run(self, thetas):
+    #     t_qc = transpile(self.circuit,
+    #                      self.backend)
+    #     qobj = assemble(t_qc,
+    #                     shots=self.shots,
+    #                     parameter_binds = [{self.theta: theta} for theta in thetas])
+    #     job = self.backend.run(qobj)
+    #     result = job.result().get_counts()
         
-        counts = np.array(list(result.values()))
-        states = np.array(list(result.keys())).astype(float)
+    #     counts = np.array(list(result.values()))
+    #     states = np.array(list(result.keys())).astype(float)
         
-        # Compute probabilities for each state
-        probabilities = counts / self.shots
-        # Get state expectation
-        expectation = np.sum(states * probabilities)
+    #     # Compute probabilities for each state
+    #     probabilities = counts / self.shots
+    #     # Get state expectation
+    #     expectation = np.sum(states * probabilities)
         
-        return np.array([expectation])
+    #     return np.array([expectation])
 
+class ExpectAndRepeatLayer(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.number_of_reuse = 64
+    
+    def forward(self, x):
+        exp_val = 0*x[0] + 1*x[1]
+        return exp_val.repeat(self.number_of_reuse)
 
 #Load Environment
 
 environment_name = "CartPole-v0"
 env = gym.make(environment_name)
 episodes = 5
-simulator = qiskit.Aer.get_backend('aer_simulator')
+circ = qrlPQC(1, 100)
+qnn = SamplerQNN(
+    circuit=circ.circuit,
+    input_params=circ.beta.params,
+    weight_params=[circ.theta],
+    input_gradients=True
+)
 
+qlayer = TorchConnector(qnn)
+    
+customRepeat = ExpectAndRepeatLayer()
 
-for episode in range(1, episodes+1):
-    state = env.reset()
+model = torch.nn.Sequential(qlayer, customRepeat, torch.nn.Linear(64, 2), torch.nn.Softmax(dim=0))
+
+test_obs = torch.Tensor([1, 1, 1])
+print("Input: " + str(test_obs))
+with torch.no_grad():
+    output = model(test_obs)
+    print("Output: " + str(output))
+    print("Action: " + str(torch.argmax(output)))
+
+# for episode in range(1, episodes+1):
+#     state = env.reset()
+#     output = model(state)
+#     # print('Expected value for rotation pi {}'.format(circuit.run([np.pi])[0]))
+#     # print(circuit.circuit.draw(output='mpl'))
+#     # print(circuit.circuit)
     
-    circuit = QuantumCircuit(1, state, simulator, 100)
-    print('Expected value for rotation pi {}'.format(circuit.run([np.pi])[0]))
-    print(circuit._circuit.draw(output='mpl'))
-    print(circuit._circuit)
+#     done = False
+#     score = 0 
     
-    done = False
-    score = 0 
-    
-    while not done:
-        env.render()
-        action = env.action_space.sample()
-        n_state, reward, done, info = env.step(action)
-        score+=reward
-    print('Episode:{} Score:{}'.format(episode, score))
+#     while not done:
+#         env.render()
+#         action = env.action_space.sample()
+#         n_state, reward, done, info = env.step(action)
+#         score+=reward
+#     print('Episode:{} Score:{}'.format(episode, score))
 env.close()
