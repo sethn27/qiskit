@@ -37,6 +37,7 @@ class qrlPQC:
         self.theta = qiskit.circuit.Parameter('theta')
         self.beta = qiskit.circuit.ParameterVector('beta', 3)
         
+        
         self.circuit.h(all_qubits)
         self.circuit.barrier()
         
@@ -45,7 +46,7 @@ class qrlPQC:
         self.circuit.rz(self.beta[2], all_qubits)
         self.circuit.barrier()
         
-        self.circuit.rz(self.theta, all_qubits)
+        self.circuit.rx(self.theta, all_qubits)
         
         
         self.circuit.measure_all()
@@ -64,7 +65,10 @@ class ExpectAndRepeatLayer(torch.nn.Module):
         exp_val = 0*x[0] + 1*x[1]
         return exp_val.repeat(self.number_of_reuse)
 
-#Define qnn model:
+
+    
+    
+#Define actor qnn model:
 circ = qrlPQC(1, 100)
 qnn = SamplerQNN(
     circuit=circ.circuit,
@@ -77,34 +81,75 @@ qlayer = TorchConnector(qnn)
     
 customRepeat = ExpectAndRepeatLayer()
 
-#Actor model, ReLU, optimizer???
+#Actor model
 model_actor = torch.nn.Sequential(qlayer, customRepeat, torch.nn.Linear(64, 2), torch.nn.Softmax(dim=0))
+
+#Define critic qnn model:
+circ_2 = qrlPQC(1, 100)
+qnn_2 = SamplerQNN(
+    circuit=circ_2.circuit,
+    input_params=circ_2.beta.params,
+    weight_params=[circ_2.theta],
+    input_gradients=True
+)
+
+qlayer_2 = TorchConnector(qnn_2)
+    
+customRepeat_2 = ExpectAndRepeatLayer()
+
 #Critic model
-model_critic = torch.nn.Sequential(qlayer, customRepeat, torch.nn.Linear(64,1))
+model_critic = torch.nn.Sequential(qlayer_2, customRepeat_2, torch.nn.Linear(64,1))
 
 
 #Optimizer for parameter
 optimizer_critic = optim.Adam(model_critic.parameters(), lr=0.04)
-optimizer_actor = optim.Adam(model_actor.parameters(), lr=0.004)
+optimizer_actor  = optim.Adam(model_actor.parameters() , lr=0.004)
+
+def softmax(x):
+    
+    f_0 = np.exp(x[0]) / np.sum(np.exp(x))
+    f_1 = np.exp(x[1]) / np.sum(np.exp(x))
+    return [f_0,f_1]
+
+def convert_data(x):
+    
+    beta0 = math.atan(x[0])
+    beta1 = math.atan(x[1])
+    beta2 = math.atan(x[2])
+    beta3 = math.atan(x[3])
+    
+    s = [beta0, beta1, beta2, beta3]
+    
+    return s
+
 
 #Use the Actor model to pick action, critic to estimate value
 def pick_action(obs):
     
   tensor_obs = torch.Tensor(obs[1:4])     
-  print(tensor_obs)
-  #no_grad(), disable gradient
+  
+  # no_grad(), disable gradient, enable gradient????
   with torch.no_grad():
-      prob = model_actor(tensor_obs)
-      value = model_critic(tensor_obs)
+       prob1 = model_actor(tensor_obs)[0].item()
+       prob2 = model_actor(tensor_obs)[1].item()
+       
+       value = model_critic(tensor_obs)
+       
+       probs =[prob1,prob2]
+       probs = softmax(probs)
+       
+       action = np.random.choice(2, p = probs  )
+       # action = torch.argmax(prob) #random choice?
+       #print(action)
+       # action = action.item() #Take action out of tensor
       
-      action = torch.argmax(prob)
       # print("Output: " + str(prob))
       # print("Action: " + str(action))
       # print("Value: " + str(value))
       
-      action = action.item() #Take action out of tensor
+  
       
-  return action, prob
+  return action, probs
 
 class Agent(object):
     def __init__(self, action_space, state_space):
@@ -146,67 +191,79 @@ class Agent(object):
     
     def ppo_loss(self, cur_pol, old_pol, advantages):
         
-        ratio = torch.div(cur_pol,old_pol).squeeze()
-        print("ratio" +str(ratio))
+        ratio = torch.div(cur_pol,old_pol)
+        #print("ratio: " +str(ratio))
         ratio = torch.clip(ratio, 1e-10, 10 - 1e-10)
         clipped = torch.clip(ratio, 1 - self.e, 1 + self.e).squeeze()
-        print(clipped.shape)
-        
-        loss = -torch.mean(torch.min(advantages * ratio , advantages * clipped ))
+        #print(clipped)
+        mul1 = torch.mul(advantages , ratio)
+        mul2 = torch.mul(advantages , clipped)
+        #print(mul1, mul2)
+        loss = -torch.mean(torch.min(mul1 , mul2))
 
         return loss
     
     def learn(self):
         # batch_indices = [i for i in range(self.iter)]
         # print("a" +str(batch_indices))
-    
-        state_batch = torch.Tensor(self.states[:self.iter])
-        print(state_batch)
-        
-        p_batch = torch.Tensor(self.probs[:self.iter])
-        p_batch = p_batch.double()
-        print(p_batch)
-        
-        action_batch = torch.Tensor(self.actions[:self.iter])
-        action_batch = action_batch.double()     
-        print(action_batch)
-        
-        rewards = self.discount_reward(self.rewards[:self.iter]) #Calculate discounted reward sum
-        rewards = torch.Tensor(rewards).squeeze()
-        print(rewards)
-        
-        value_tensor = torch.zeros(state_batch.shape[0])
-        actor_predict = torch.zeros((state_batch.shape[0],2))
-        
         for _ in range(self.K):
+            state_batch = torch.Tensor(self.states[:self.iter])
+            #print(state_batch)
+            
+            p_batch = torch.Tensor(self.probs[:self.iter])
+            p_batch = p_batch.double()
+            #print(p_batch)
+            
+            action_batch = torch.Tensor(self.actions[:self.iter])
+            action_batch = action_batch.double()     
+            #print(action_batch)
+            
+            
+            
+            rewards = self.discount_reward(self.rewards[:self.iter]) #Calculate discounted reward sum
+            rewards = torch.Tensor(rewards)
+            
+            #print(rewards)
+         
+            value_tensor = torch.zeros(state_batch.shape[0],1)
+            actor_predict = torch.zeros((state_batch.shape[0],2))
+        
+        
             for i in range(state_batch.shape[0]):
-                value_tensor[i] = model_critic(state_batch[i,1:4])                                      
-                print(value_tensor)
+                value_tensor[i,0] = model_critic(state_batch[i,1:4])                                      
+                
             
+            #print("value_tensor:" +str( value_tensor))
             critic_loss = torch.mean((value_tensor - rewards)**2)
-            print("critc loss" +str(critic_loss))
+            print("critc loss: " +str(critic_loss))
             
-            
-            optimizer_critic.zero_grad()
-            critic_loss.backward() #gradient descent of critic loss
-            optimizer_critic.step()
-            
-            
-            
+       
             advantage = rewards - value_tensor        
             advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-8) #advantages normalized
-            print("advantage: " +str(advantage))
+            #advantage = torch.transpose(advantage,0,1)
+            #print("advantage: " +str(advantage))
+            
+            
             
             
             for i in range(state_batch.shape[0]):              
                 actor_predict[i] = model_actor(state_batch[i,1:4])
-            print(actor_predict)  
-            print(p_batch)
+            #print(actor_predict)  
+            #print(p_batch)
             
-            actor_loss = self.ppo_loss(actor_predict, p_batch, advantage.squeeze())
+            actor_loss = self.ppo_loss(actor_predict, p_batch, advantage)
+            print("actor loss: " +str(actor_loss))
             
+            total_loss = actor_loss + 0.5*critic_loss
+            
+            optimizer_critic.zero_grad()         
             optimizer_actor.zero_grad()
-            actor_loss.backward() #gradient descent of critic loss
+            
+            #critic_loss.backward() #gradient descent of critic loss
+            #actor_loss.backward() #gradient descent (ascent??) of actor loss
+            total_loss.backward()
+            
+            optimizer_critic.step() #how to check theta??
             optimizer_actor.step()
         
         
@@ -216,7 +273,7 @@ class Agent(object):
 
 environment_name = "CartPole-v0"
 env = gym.make(environment_name)
-episodes = 1
+episodes = 100
 PPO_agent = Agent(env.action_space.n, env.observation_space.shape)
 
 
@@ -228,13 +285,15 @@ for episode in range(1, episodes+1):
     while not done:
         #env.render()       
         
-        action, prob = pick_action(ini_state)
-        print(action)
+        converted_state = convert_data(ini_state)
+        action, prob = pick_action(converted_state)
+        
+        #print(action)
         n_state, reward, done, info = env.step(action)
         score+=reward
-        PPO_agent.remember(ini_state, reward, action, prob)
+        PPO_agent.remember(converted_state, reward, action, prob)
         
         ini_state = n_state
     PPO_agent.learn()
     print('Episode:{} Score:{}'.format(episode, score))
-#env.close()
+env.close()
