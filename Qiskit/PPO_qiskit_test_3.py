@@ -9,6 +9,7 @@ from torchvision import datasets, transforms
 import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions.categorical import Categorical
 
 import math
 import numpy as np
@@ -53,6 +54,39 @@ class qrlPQC:
         # ---------------------------
 
         self.shots = shots
+
+class qrlPQC2:
+    """ 
+    This class provides a simple interface for interaction 
+    with the quantum circuit 
+    """
+    
+    def __init__(self, n_qubits, shots):
+        
+        # --- Circuit definition ---
+        self.circuit = qiskit.QuantumCircuit(n_qubits)
+        
+        all_qubits = [i for i in range(n_qubits)]
+        
+        self.alpha = qiskit.circuit.Parameter('alpha')
+        self.beta = qiskit.circuit.ParameterVector('beta', 3)
+        
+        
+        self.circuit.h(all_qubits)
+        self.circuit.barrier()
+        
+        self.circuit.rz(self.beta[0], all_qubits)
+        self.circuit.ry(self.beta[1], all_qubits)
+        self.circuit.rz(self.beta[2], all_qubits)
+        self.circuit.barrier()
+        
+        self.circuit.rx(self.alpha, all_qubits)
+        
+        
+        self.circuit.measure_all()
+        # ---------------------------
+
+        self.shots = shots
     
 
 
@@ -62,9 +96,17 @@ class ExpectAndRepeatLayer(torch.nn.Module):
         self.number_of_reuse = 64
     
     def forward(self, x):
-        exp_val = 0*x[0] + 1*x[1]
+        exp_val = 1*x[0] + (-1)*x[1]
         return exp_val.repeat(self.number_of_reuse)
 
+class ExpectAndRepeatLayer2(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.number_of_reuse = 64
+    
+    def forward(self, x):
+        exp_val = 1*x[0] + (-1)*x[1]
+        return exp_val.repeat(self.number_of_reuse)
 
     
     
@@ -85,17 +127,17 @@ customRepeat = ExpectAndRepeatLayer()
 model_actor = torch.nn.Sequential(qlayer, customRepeat, torch.nn.Linear(64, 2), torch.nn.Softmax(dim=0))
 
 #Define critic qnn model:
-circ_2 = qrlPQC(1, 100)
+circ_2 = qrlPQC2(1, 100)
 qnn_2 = SamplerQNN(
     circuit=circ_2.circuit,
     input_params=circ_2.beta.params,
-    weight_params=[circ_2.theta],
+    weight_params=[circ_2.alpha],
     input_gradients=True
 )
 
 qlayer_2 = TorchConnector(qnn_2)
     
-customRepeat_2 = ExpectAndRepeatLayer()
+customRepeat_2 = ExpectAndRepeatLayer2()
 
 #Critic model
 model_critic = torch.nn.Sequential(qlayer_2, customRepeat_2, torch.nn.Linear(64,1))
@@ -129,27 +171,29 @@ def pick_action(obs):
   tensor_obs = torch.Tensor(obs[1:4])     
   
   # no_grad(), disable gradient, enable gradient????
-  with torch.no_grad():
-       prob1 = model_actor(tensor_obs)[0].item()
-       prob2 = model_actor(tensor_obs)[1].item()
+  #with torch.no_grad():
+  prob1 = model_actor(tensor_obs)[0].item()
+  prob2 = model_actor(tensor_obs)[1].item()
        
-       value = model_critic(tensor_obs)
+  value = model_critic(tensor_obs)
        
-       probs =[prob1,prob2]
-       probs = softmax(probs)
+  probs =[prob1,prob2]
+  probs = softmax(probs)
        
-       action = np.random.choice(2, p = probs  )
-       # action = torch.argmax(prob) #random choice?
+  action = np.random.choice(2, p = probs  )
+  # action = torch.argmax(prob) #random choice?
        #print(action)
        # action = action.item() #Take action out of tensor
       
       # print("Output: " + str(prob))
       # print("Action: " + str(action))
       # print("Value: " + str(value))
-      
-  
-      
+   
   return action, probs
+
+#logprob = dist.log_prob(sample) means to get the logarithmic probability (logprob) 
+#of one experiment sample (sample) under a specific distribution (dist).
+
 
 class Agent(object):
     def __init__(self, action_space, state_space):
@@ -196,12 +240,22 @@ class Agent(object):
         ratio = torch.clip(ratio, 1e-10, 10 - 1e-10)
         clipped = torch.clip(ratio, 1 - self.e, 1 + self.e).squeeze()
         #print(clipped)
-        mul1 = torch.mul(advantages , ratio)
-        mul2 = torch.mul(advantages , clipped)
-        #print(mul1, mul2)
-        loss = -torch.mean(torch.min(mul1 , mul2))
+        # mul1 = torch.mul(advantages , ratio)
+        # mul2 = torch.mul(advantages , clipped)
+        # print(mul1, mul2)
+        mul1 = advantages * ratio 
+        mul2 = advantages *clipped 
+        print(mul1, mul2)
+        loss = -torch.mean(torch.min(mul1  , mul2 ))
 
         return loss
+    
+    def log_prob(self,probs, action):
+        dist = Categorical(probs)
+        #action = dist.sample()
+        #print(action)
+        log_prob_out =dist.log_prob(action)
+        return log_prob_out
     
     def learn(self):
         # batch_indices = [i for i in range(self.iter)]
@@ -214,12 +268,13 @@ class Agent(object):
             p_batch = p_batch.double()
             #print(p_batch)
             
-            action_batch = torch.Tensor(self.actions[:self.iter])
+            action_batch = np.zeros(self.iter)
+            for i in range(self.iter):              
+                action_batch[i] = self.actions[i]
+            action_batch = torch.Tensor(action_batch)
             action_batch = action_batch.double()     
             #print(action_batch)
-            
-            
-            
+
             rewards = self.discount_reward(self.rewards[:self.iter]) #Calculate discounted reward sum
             rewards = torch.Tensor(rewards)
             
@@ -235,13 +290,13 @@ class Agent(object):
             
             #print("value_tensor:" +str( value_tensor))
             critic_loss = torch.mean((value_tensor - rewards)**2)
-            print("critc loss: " +str(critic_loss))
+            #print("critc loss: " +str(critic_loss))
             
        
             advantage = rewards - value_tensor        
             advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-8) #advantages normalized
-            #advantage = torch.transpose(advantage,0,1)
-            #print("advantage: " +str(advantage))
+            advantage = torch.transpose(advantage,0,1)
+            print("advantage: " +str(advantage))
             
             
             
@@ -251,16 +306,23 @@ class Agent(object):
             #print(actor_predict)  
             #print(p_batch)
             
-            actor_loss = self.ppo_loss(actor_predict, p_batch, advantage)
+            old_actor = self.log_prob(p_batch, action_batch)
+            #print(old_actor)
+            new_actor = self.log_prob(actor_predict,action_batch)
+            #print(new_actor)
+            
+            rewards = torch.transpose(rewards,0,1)
+            actor_loss = self.ppo_loss(new_actor, old_actor, rewards)
             print("actor loss: " +str(actor_loss))
             
-            total_loss = actor_loss + 0.5*critic_loss
+            total_loss = actor_loss + 0*critic_loss
             
             optimizer_critic.zero_grad()         
             optimizer_actor.zero_grad()
             
-            #critic_loss.backward() #gradient descent of critic loss
-            #actor_loss.backward() #gradient descent (ascent??) of actor loss
+            # actor_loss.backward() #gradient descent (ascent??) of actor loss
+            # critic_loss.backward() #gradient descent of critic loss
+            
             total_loss.backward()
             
             optimizer_critic.step() #how to check theta??
@@ -273,7 +335,7 @@ class Agent(object):
 
 environment_name = "CartPole-v0"
 env = gym.make(environment_name)
-episodes = 100
+episodes = 1000
 PPO_agent = Agent(env.action_space.n, env.observation_space.shape)
 
 
