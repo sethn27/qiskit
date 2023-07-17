@@ -25,7 +25,7 @@ backend = Aer.get_backend('aer_simulator_statevector')
 
 env_name = 'CartPole-v1'
 import math
-EPISODES = 10
+EPISODES = 5
 
 # Transfer the state to the angle.
 def get_angles(x):
@@ -75,7 +75,7 @@ class QuantumCircuit:
         result = job.result().get_counts()
         counts = np.array(list(result.values()))
         states = np.array(list(result.keys())).astype(float)
-        print('Output',states)
+        #print('Output',states)
         
         # Compute probabilities for each state
         probabilities = counts / self.shots
@@ -95,7 +95,7 @@ def softmax(x):
 
 class VQC():
     def get_action(self, state):
-        print('States: ',state)
+        #print('States: ',state)
         circuit = QuantumCircuit(1, backend, 1024)
         measurement_0,measurement_1 = circuit.run(state)                  
         print('Output Measurement (expectation)',measurement_0,measurement_1)
@@ -103,7 +103,7 @@ class VQC():
         # trainable parameters of NN and bias
         measurement_0 = 39.853912 * measurement_0  +0.05803982     
         measurement_1 = -39.853912 * measurement_1 -0.05803982
-        print('Scaled Measurement',measurement_0,measurement_1)
+        #print('Scaled Measurement',measurement_0,measurement_1)
 
         action_prob = [measurement_0,measurement_1]
         action_prob = softmax(action_prob)
@@ -127,7 +127,7 @@ def main():
         done = False
         rewards=0
         #change in gym v26
-        s1, info = env.reset(seed = 34)
+        s1 = env.reset()
         env.render()
         episode_action = []
         while not done:
@@ -156,6 +156,7 @@ def main():
     plt.ylabel('Reward')
     plt.xlabel('Iteration')
     plt.show()
+    env.close()
 
 
 if __name__=="__main__":

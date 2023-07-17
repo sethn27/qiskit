@@ -124,20 +124,7 @@ X_train.targets = X_train.targets[idx]
 
 train_loader = torch.utils.data.DataLoader(X_train, batch_size=1, shuffle=True)
 
-# Concentrating on the first 100 samples
-n_samples = 100
 
-X_train = datasets.MNIST(root='./data', train=True, download=True,
-                         transform=transforms.Compose([transforms.ToTensor()]))
-
-# Leaving only labels 0 and 1 
-idx = np.append(np.where(X_train.targets == 0)[0][:n_samples], 
-                np.where(X_train.targets == 1)[0][:n_samples])
-
-X_train.data = X_train.data[idx]
-X_train.targets = X_train.targets[idx]
-
-train_loader = torch.utils.data.DataLoader(X_train, batch_size=1, shuffle=True)
 
 n_samples = 50
 
