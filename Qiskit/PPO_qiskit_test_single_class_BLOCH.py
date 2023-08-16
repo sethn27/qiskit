@@ -46,16 +46,16 @@ class QNN_PPO_Agent(object):
         self.actions = np.zeros((self.H, 1))
         self.probs = np.zeros((self.H, self.action_space))
         
-        self.gamma = 0.98  # Discount factor
-        self.K = 1  # Number of epochs
+        self.gamma = 0.99  # Discount factor
+        self.K = 4  # Number of epochs
         self.e = 0.1  # Policy distance
         
         #Make actor and critic
         self.actor, self.critic = self.make_model()
         
         #Optimizer for models
-        self.optimizer_actor  = optim.Adam(self.actor.parameters() , lr=0.004)
-        self.optimizer_critic = optim.Adam(self.critic.parameters(), lr=0.04)
+        self.optimizer_actor  = optim.Adam(self.actor.parameters() , lr=0.005)
+        self.optimizer_critic = optim.Adam(self.critic.parameters(), lr=0.01)
         
 
         #Learning rate update
@@ -88,7 +88,7 @@ class QNN_PPO_Agent(object):
         #Actor model
         model_actor = torch.nn.Sequential(qlayer_actor, customRepeat_actor, torch.nn.Linear(64, 2), torch.nn.Softmax(dim=-1))
         #Critic model
-        model_critic = torch.nn.Sequential(qlayer_critic, customRepeat_critic, torch.nn.Linear(64, 1), torch.nn.Softmax(dim=-1))
+        model_critic = torch.nn.Sequential(qlayer_critic, torch.nn.Linear(1, 256),torch.nn.Linear(256, 1))
         
         return model_actor, model_critic
         
@@ -151,12 +151,12 @@ class QNN_PPO_Agent(object):
       tensor_obs = torch.Tensor(obs[1:4])     
       
       actor_output =   self.actor(tensor_obs)
-      #print(actor_output)
-      prob1 = actor_output[0].item()
-      prob2 = actor_output[1].item()
-      probs =[prob1,prob2]
-      probs = self.softmax(probs)
-      # print(probs)
+      print(actor_output)
+      prob1 = round(actor_output[0].item(),2)
+      prob2 = round(actor_output[1].item(),2)
+      probs = [prob1,prob2]
+      #probs = self.softmax(probs)
+      print(probs)
       action = np.random.choice(2, p = probs  )
       
       critic_output = self.critic(tensor_obs)
@@ -183,12 +183,34 @@ class QNN_PPO_Agent(object):
                 Gt = 0
             else:
                 Gt = rewards[i] + self.gamma * Gt
+                #print(Gt)
             d_rewards[i] = Gt
+            
+        
         return d_rewards
+    
+    def expected_return(self, rewards, values):
+        d_rewards = np.zeros_like(rewards)
+        Gt = 0
+        # Discount rewards
+        for i in reversed(range(len(rewards))):
+            discount = 1
+            Gt = 0
+            for k in range(i, len(rewards)-1):
+                Gt += discount*(rewards[k] + self.gamma * values[k+1] - values[k]) 
+                discount *= self.gamma*0.95
+                #print(Gt)
+            d_rewards[i] = Gt
+            
+        d_rewards = d_rewards + values
+        return d_rewards
+    
+  
     
     def ppo_loss(self, cur_pol, old_pol, advantages):
         
         ratio = cur_pol/old_pol
+        #print(ratio)
         ratio = torch.clip(ratio, 1e-10, 10 - 1e-10)
         clipped = torch.clip(ratio, 1 - self.e, 1 + self.e)
         mul1 = advantages * ratio 
@@ -199,50 +221,72 @@ class QNN_PPO_Agent(object):
     
     def learn(self):
         
+        # for t in range(self.K):
+        #print('Epoch: '+  str(t))
+        state_batch = torch.Tensor(self.states[:self.iter])
+        #print(state_batch)
+        p_batch = torch.Tensor(self.probs[:self.iter])
+        p_batch = p_batch.double()
+        #print(p_batch)
+        v_batch = torch.Tensor(self.value[:self.iter])
+        v_batch = v_batch.double()
+        #print(v_batch)
+        action_batch = torch.zeros((self.iter,1),dtype=torch.int64)
+        for i in range(self.iter):              
+            action_batch[i,0] = self.actions[i,0]
+        action_batch = torch.Tensor(action_batch)
+        #print(action_batch)
+        
+        #rewards = self.discount_reward(self.rewards[:self.iter]) #Calculate discounted reward sum
+        #rewards = (rewards - torch.mean(rewards)) / (torch.std(rewards) + 1e-8) #d_rewards normalized
+        rewards = self.expected_return(self.rewards[:self.iter],self.value[:self.iter]) 
+        rewards = torch.Tensor(rewards)
+        print(rewards)
+        #sys.exit()
         for t in range(self.K):
-            #print('Epoch: '+  str(t))
-            state_batch = torch.Tensor(self.states[:self.iter])
-            #print(state_batch)
-            p_batch = torch.Tensor(self.probs[:self.iter])
-            p_batch = p_batch.double()
-            print(p_batch)
-            v_batch = torch.Tensor(self.value[:self.iter])
-            v_batch = v_batch.double()
-            #print(v_batch)
-            action_batch = torch.zeros((self.iter,1),dtype=torch.int64)
-            for i in range(self.iter):              
-                action_batch[i,0] = self.actions[i,0]
-            action_batch = torch.Tensor(action_batch)
-            #print(action_batch)
-            rewards = self.discount_reward(self.rewards[:self.iter]) #Calculate discounted reward sum
-            rewards = torch.Tensor(rewards)
-            #print(rewards)
-         
             value_tensor = torch.zeros(state_batch.shape[0],1)
             actor_predict = torch.zeros((state_batch.shape[0],2))
- 
+                
             #Critic loss
             for i in range(state_batch.shape[0]):
-                value_tensor[i,0] = self.critic(state_batch[i,1:4])                                        
-            critic_loss = torch.mean((value_tensor - rewards)**2)
+                value_tensor[i,0] = self.critic(state_batch[i,1:4])  
+
+            #with torch.no_grad():
+            advantage = rewards - value_tensor
+                          
+            #critic_loss = torch.mean((value_tensor - rewards)**2)
+            critic_loss = (advantage )**2
+            print(rewards)
+            print(critic_loss)
+            critic_loss = torch.mean((advantage)**2)
+            print(value_tensor)
+            print("critic loss: " +str(critic_loss))
             
             #Actor loss
-            with torch.no_grad():
-                advantage = rewards - value_tensor               
+                     
+            #advantage = rewards - v_batch
             #advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-8) #advantages normalized
-            advantage = torch.transpose(advantage,0,1)
+            #advantage = torch.transpose(advantage,0,1)
             for i in range(state_batch.shape[0]):              
                 actor_predict[i] = self.actor(state_batch[i,1:4])
+            
             old_actor = torch.gather(p_batch, 0, action_batch)
             new_actor = torch.gather(actor_predict, 0, action_batch)
             actor_loss = self.ppo_loss(new_actor, old_actor, advantage)
+            #print(old_actor)
+            #print(new_actor)
+            #action_log = torch.log(actor_predict)
+            #print(action_log)
+            #actor_loss = -torch.sum(action_log*advantage)
             print("actor loss: " +str(actor_loss))
             
+            #total_loss = critic_loss + actor_loss
             #Optimize
             self.optimizer_critic.zero_grad()         
             self.optimizer_actor.zero_grad()
-            actor_loss.backward() #gradient descent (ascent??) of actor loss
-            critic_loss.backward() #gradient descent of critic loss
+            critic_loss.backward(retain_graph=True) #gradient descent of critic loss
+            actor_loss.backward(retain_graph=True) #gradient descent (ascent??) of actor loss
+            #total_loss.backward()
             print(self.actor[0].weight)
             print(self.critic[0].weight)
             self.optimizer_critic.step() #how to check theta??
@@ -250,6 +294,10 @@ class QNN_PPO_Agent(object):
             self.scheduler.step()
             
         self.iter = 0
+        print("Actor NN bias " + str(self.actor[2].bias))
+        #print("Actor NN weight 1" + str(self.actor[2].weight[0]))
+        print("Actor NN weight 1" + str(torch.sum(self.actor[2].weight[0])))
+        print("Actor NN weight 2" + str(torch.sum(self.actor[2].weight[1])))
         
         # return model_actor[0].weight.item(), model_critic[0].weight.item()
         return actor_loss.item(), critic_loss.item(), self.actor[0].weight.item()
@@ -258,7 +306,7 @@ class QNN_PPO_Agent(object):
 
 environment_name = "CartPole-v1"
 env = gym.make(environment_name)
-episodes = 2000
+episodes = 20000
 PPO_agent = QNN_PPO_Agent(env.action_space.n, env.observation_space.shape)
 actor_arr =  []
 critic_arr = []
@@ -342,10 +390,10 @@ for episode in range(1, episodes+1):
         ini_state = n_state
         
     #Show states on Bloch sphere    
-    for e in range(len(obs1)):  
-        state_1=Statevector.from_instruction(qc_A.bind_parameters({beta1_param:obs1[e], beta2_param:obs2[e], beta3_param:obs3[e]}))          
-        b1.add_points(state_to_bloch(state_1))            
-    b1.show()
+    # for e in range(len(obs1)):  
+    #     state_1=Statevector.from_instruction(qc_A.bind_parameters({beta1_param:obs1[e], beta2_param:obs2[e], beta3_param:obs3[e]}))          
+    #     b1.add_points(state_to_bloch(state_1))            
+    # b1.show()
     
     actor, critic, param = PPO_agent.learn()
     actor_arr.append(actor) 
