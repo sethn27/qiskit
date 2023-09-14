@@ -40,20 +40,21 @@ class QNN_PPO_Agent(object):
         self.H = 500  # Horizon, max number of element within tensor (max time step)
         self.states = np.zeros((self.H, self.state_space))
         self.rewards = np.zeros((self.H, 1))
+        self.done = np.zeros((self.H, 1))
         self.value = np.zeros((self.H, 1))
         self.actions = np.zeros((self.H, 1))
         self.probs = np.zeros((self.H, self.action_space))
         
-        self.gamma = 0.98  # Discount factor
-        self.K = 1  # Number of epochs
-        self.e = 0.1  # Policy distance
+        self.gamma = 0.99  # Discount factor
+        self.K = 4  # Number of epochs
+        self.e = 0.08  # Policy distance
         
         #Make actor and critic
         self.actor, self.critic = self.make_model()
         
         #Optimizer for models
-        self.optimizer_actor  = optim.Adam(self.actor.parameters() , lr=0.004)
-        self.optimizer_critic = optim.Adam(self.critic.parameters(), lr=0.08)
+        self.optimizer_actor  = optim.Adam(self.actor.parameters() , lr=0.005)
+        self.optimizer_critic = optim.Adam(self.critic.parameters(), lr=0.04)
         
 
         #Learning rate update
@@ -86,7 +87,7 @@ class QNN_PPO_Agent(object):
         #Actor model
         model_actor = torch.nn.Sequential(qlayer_actor, customRepeat_actor, torch.nn.Linear(64, 2), torch.nn.Softmax(dim=-1))
         #Critic model
-        model_critic = torch.nn.Sequential(qlayer_critic, customRepeat_critic, torch.nn.Linear(64, 1))
+        model_critic = torch.nn.Sequential(qlayer_critic, customRepeat_critic ,torch.nn.Linear(64, 1))
         
         return model_actor, model_critic
         
@@ -146,27 +147,28 @@ class QNN_PPO_Agent(object):
     #Use the Actor model to pick action, critic to estimate value
     def pick_action(self, obs):
 
-      tensor_obs = torch.Tensor(obs[1:4])     
-      
-      actor_output =   self.actor(tensor_obs)
-      #print(actor_output)
-      prob1 = actor_output[0].item()
-      prob2 = actor_output[1].item()
-      probs =[prob1,prob2]
-      probs = self.softmax(probs)
-      #print(probs)
-      action = np.random.choice(2, p = probs  )
+      tensor_obs = torch.Tensor(obs[1:4])      
+      actor_output =   self.actor(tensor_obs) 
+      dist = Categorical(actor_output)
+      action = dist.sample()
       
       critic_output = self.critic(tensor_obs)
       value =  critic_output.item()
+      # print(actor_output)
+      prob1 = round(actor_output[0].item(),4)
+      prob2 = 1 - prob1
+      probs = [prob1,prob2]
+      #probs = self.softmax(probs)
+      #print(probs)
+      #action = np.random.choice(2, p = probs  )
+      return action.item(), probs, value
   
-      return action, probs, value
-  
-    def remember(self, state, reward, action, probs, vals):
+    def remember(self, state, reward, action, probs, vals, done):
         
         i = self.iter
         self.states[i] = state
         self.rewards[i] = reward
+        self.done[i] = done
         self.value[i] = vals
         self.actions[i] = action
         self.probs[i] = probs
@@ -181,16 +183,39 @@ class QNN_PPO_Agent(object):
                 Gt = 0
             else:
                 Gt = rewards[i] + self.gamma * Gt
+                #print(Gt)
             d_rewards[i] = Gt
+            
+        
         return d_rewards
+    
+    def expected_return(self, rewards, values, done):
+        d_rewards = np.zeros_like(rewards)
+        Gt = 0
+        # Discount rewards
+        for i in reversed(range(len(rewards))):
+            discount = 1
+            Gt = 0
+            for k in range(i, len(rewards)-1):
+                Gt += discount*(rewards[k] + self.gamma * values[k+1]*(1-int(done[k])) - values[k]) 
+                discount *= self.gamma*0.95
+                #print(Gt)
+            d_rewards[i] = Gt
+            
+        #d_rewards = d_rewards + values
+        return d_rewards
+    
+  
     
     def ppo_loss(self, cur_pol, old_pol, advantages):
         
-        ratio = cur_pol/old_pol
+        ratio = cur_pol.exp()/old_pol.exp()
+        #print(ratio)
         ratio = torch.clip(ratio, 1e-10, 10 - 1e-10)
         clipped = torch.clip(ratio, 1 - self.e, 1 + self.e)
         mul1 = advantages * ratio 
         mul2 = advantages *clipped 
+        #print(clipped)
         loss = -torch.min(mul1  , mul2 ).mean()
 
         return loss
@@ -203,53 +228,68 @@ class QNN_PPO_Agent(object):
         #print(state_batch)
         p_batch = torch.Tensor(self.probs[:self.iter])
         p_batch = p_batch.double()
-        #print(p_batch)
+        print(p_batch)
         v_batch = torch.Tensor(self.value[:self.iter])
         v_batch = v_batch.double()
         #print(v_batch)
         action_batch = torch.zeros((self.iter,1),dtype=torch.int64)
+        done_batch = torch.Tensor(self.done[:self.iter])
+        done_batch = done_batch.double()
+        
+        
         for i in range(self.iter):              
             action_batch[i,0] = self.actions[i,0]
         action_batch = torch.Tensor(action_batch)
         #print(action_batch)
+        
         rewards = self.discount_reward(self.rewards[:self.iter]) #Calculate discounted reward sum
+        #rewards = (rewards - torch.mean(rewards)) / (torch.std(rewards) + 1e-8) #d_rewards normalized
+        #rewards = self.expected_return(self.rewards[:self.iter],self.value[:self.iter],self.done[:self.iter]) 
         rewards = torch.Tensor(rewards)
         #print(rewards)
-         
+        #advantage = rewards - v_batch
         for t in range(self.K):
             value_tensor = torch.zeros(state_batch.shape[0],1)
             actor_predict = torch.zeros((state_batch.shape[0],2))
- 
-            #Critic loss
-            for i in range(state_batch.shape[0]):
-                value_tensor[i,0] = self.critic(state_batch[i,1:4])                                        
-            critic_loss = torch.mean((value_tensor - rewards)**2)
-            print("critic loss: " +str(critic_loss))
             
-            #Actor loss
-            #with torch.no_grad():
-            advantage = rewards - value_tensor         
-            #advantage = rewards - v_batch
-            #advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-8) #advantages normalized
-            advantage = torch.transpose(advantage,0,1)
+            
+            #advantage = torch.transpose(advantage,0,1)
             for i in range(state_batch.shape[0]):              
                 actor_predict[i] = self.actor(state_batch[i,1:4])
+            for i in range(state_batch.shape[0]):
+                value_tensor[i,0] = self.critic(state_batch[i,1:4]) 
+            
+            #Critic loss
+            critic_loss = torch.mean(torch.square(rewards - value_tensor))
+            #print(value_tensor)
+            print("critic loss: " +str(critic_loss))
+ 
+            
+            
+            #Actor loss
+            with torch.no_grad():
+                advantage = rewards - value_tensor
+            advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-8) #advantages normalized
+            #print(advantage)
             old_actor = torch.gather(p_batch, 0, action_batch)
             new_actor = torch.gather(actor_predict, 0, action_batch)
             actor_loss = self.ppo_loss(new_actor, old_actor, advantage)
             print("actor loss: " +str(actor_loss))
             
+            
+            total_loss = 0.5*critic_loss + actor_loss
             #Optimize
             self.optimizer_critic.zero_grad()         
             self.optimizer_actor.zero_grad()
-            critic_loss.backward(retain_graph=True) #gradient descent of critic loss
-            actor_loss.backward(retain_graph=True) #gradient descent (ascent??) of actor loss
-            
+            critic_loss.backward() #gradient descent of critic loss
+            actor_loss.backward() #gradient descent (ascent??) of actor loss
+            #total_loss.backward()
             print(self.actor[0].weight)
             print(self.critic[0].weight)
+            
             self.optimizer_critic.step() #how to check theta??
             self.optimizer_actor.step()
-            self.scheduler.step()
+            #self.scheduler.step()
             
         self.iter = 0
         print("Actor NN bias " + str(self.actor[2].bias))
@@ -342,7 +382,7 @@ for episode in range(1, episodes+1):
         action, prob, vals = PPO_agent.pick_action(converted_state)
         n_state, reward, done, info, _ = env.step(action)
         score+=reward
-        PPO_agent.remember(ini_state, reward, action, prob, vals)
+        PPO_agent.remember(ini_state, reward, action, prob, vals, done)
         ini_state = n_state
         
     #Show states on Bloch sphere    
@@ -368,16 +408,16 @@ for episode in range(1, episodes+1):
     
     print('Episode:{} Score:{}'.format(episode, score))
 
+env.close()
 plt.figure()
-plt.title("Actor Loss")
+plt.title("Qiskit-Pytorch Quantum RL PPO Actor Loss ")
 plt.semilogy(np.arange(episodes), np.abs(actor_arr))
 plt.savefig("actor.png")
 plt.figure()
-plt.title("Critic Loss")
+plt.title("Qiskit-Pytorch Quantum RL PPO Critic Loss ")
 plt.semilogy(np.arange(episodes), np.abs(critic_arr))
 plt.savefig("critic.png")
 plt.figure()
-plt.title("Reward")
+plt.title("Qiskit-Pytorch Quantum RL PPO Rewards ")
 plt.semilogy(np.arange(episodes), np.abs(score_arr))
 plt.savefig("score.png")
-env.close()
