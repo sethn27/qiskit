@@ -1,6 +1,4 @@
-import gym 
-import sys
-import random
+import gym
 # from stable_baselines3 import PPO
 # from stable_baselines3.common.vec_env import DummyVecEnv
 # from stable_baselines3.common.evaluation import evaluate_policy
@@ -361,10 +359,9 @@ obs2 = []
 obs3 = []
      
 for episode in range(1, episodes+1):
-    ini_state = env.reset()    
+    ini_state = env.reset()[0]    
     done = False
     score = 0 
-    
     # Bloch sphere plot formatting   
     b1 = Bloch()
     b2 = Bloch()
@@ -374,7 +371,6 @@ for episode in range(1, episodes+1):
     b2.point_marker = ['o']
     b1.point_size=[2]
     b2.point_size=[2]
-    
     while not done:
         #env.render()       
         
@@ -384,7 +380,7 @@ for episode in range(1, episodes+1):
         
         converted_state = PPO_agent.convert_data(ini_state)
         action, prob, vals = PPO_agent.pick_action(converted_state)
-        n_state, reward, done, info = env.step(action)
+        n_state, reward, done, info, _ = env.step(action)
         score+=reward
         PPO_agent.remember(ini_state, reward, action, prob, vals, done)
         ini_state = n_state
@@ -401,28 +397,27 @@ for episode in range(1, episodes+1):
     score_arr.append(score)
     
     #Show states with parameter theta
-    for n in range(len(obs1)):        
-      state_2=Statevector.from_instruction(qc_B.bind_parameters({beta1_param:obs1[n], beta2_param:obs2[n], beta3_param:obs3[n], theta_param:param})) 
-      b2.add_points(state_to_bloch(state_2))
-    b2.show()
+    # for n in range(len(obs1)):        
+    #   state_2=Statevector.from_instruction(qc_B.bind_parameters({beta1_param:obs1[n], beta2_param:obs2[n], beta3_param:obs3[n], theta_param:param})) 
+    #   b2.add_points(state_to_bloch(state_2))
+    # b2.show()
     
     obs1 = []
     obs2 = []
     obs3 = []
     
     print('Episode:{} Score:{}'.format(episode, score))
+
 env.close()
 plt.figure()
-plt.title("Qiskit-Pytorch Quantum RL PPO Rewards ")
-plt.plot(score_arr, label='Reward')
-plt.legend()
-plt.ylabel('Rewards')
-plt.xlabel('Episodes')
-
+plt.title("Qiskit-Pytorch Quantum RL PPO Actor Loss ")
+plt.semilogy(np.arange(episodes), np.abs(actor_arr))
+plt.savefig("actor.png")
 plt.figure()
-plt.title("Qiskit-Pytorch Quantum RL PPO Losses ")
-plt.plot(actor_arr, label='Actor Loss')
-plt.plot(critic_arr, label='Critic Loss')
-plt.legend()
-plt.ylabel('Loss')
-plt.xlabel('Episodes')
+plt.title("Qiskit-Pytorch Quantum RL PPO Critic Loss ")
+plt.semilogy(np.arange(episodes), np.abs(critic_arr))
+plt.savefig("critic.png")
+plt.figure()
+plt.title("Qiskit-Pytorch Quantum RL PPO Rewards ")
+plt.semilogy(np.arange(episodes), np.abs(score_arr))
+plt.savefig("score.png")

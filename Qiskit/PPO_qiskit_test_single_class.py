@@ -41,7 +41,7 @@ class QNN_PPO_Agent(object):
         self.probs = np.zeros((self.H, self.action_space))
         
         self.gamma = 0.98  # Discount factor
-        self.K = 1  # Number of epochs
+        self.K = 4  # Number of epochs
         self.e = 0.1  # Policy distance
         
         #Make actor and critic
@@ -82,7 +82,7 @@ class QNN_PPO_Agent(object):
         #Actor model
         model_actor = torch.nn.Sequential(qlayer_actor, customRepeat_actor, torch.nn.Linear(64, 2), torch.nn.Softmax(dim=-1))
         #Critic model
-        model_critic = torch.nn.Sequential(qlayer_critic, customRepeat_critic, torch.nn.Linear(64, 1), torch.nn.Softmax(dim=-1))
+        model_critic = torch.nn.Sequential(qlayer_critic, customRepeat_critic, torch.nn.Linear(64, 1))
         
         return model_actor, model_critic
         
@@ -146,12 +146,15 @@ class QNN_PPO_Agent(object):
       
       actor_output =   self.actor(tensor_obs)
       #print(actor_output)
-      prob1 = actor_output[0].item()
-      prob2 = actor_output[1].item()
-      probs =[prob1,prob2]
-      probs = self.softmax(probs)
+    #   prob1 = actor_output[0].item()
+    #   prob2 = actor_output[1].item()
+    #   probs =np.array([prob1,prob2])
+    #   probs /= np.linalg.norm(probs, ord=1)
+      probs = actor_output.detach().numpy()
+      print(probs)
+    #   probs = self.softmax(probs)
       # print(probs)
-      action = np.random.choice(2, p = probs  )
+      action = np.random.choice(self.action_space, p = probs  )
       
       critic_output = self.critic(tensor_obs)
       value =  critic_output.item()
@@ -219,11 +222,11 @@ class QNN_PPO_Agent(object):
             for i in range(state_batch.shape[0]):
                 value_tensor[i,0] = self.critic(state_batch[i,1:4])                                        
             critic_loss = torch.mean((value_tensor - rewards)**2)
-            
+            print("critic loss: " +str(critic_loss))
             #Actor loss
             with torch.no_grad():
                 advantage = rewards - value_tensor               
-            #advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-8) #advantages normalized
+            # advantage = (advantage - torch.mean(advantage)) / (torch.std(advantage) + 1e-8) #advantages normalized
             advantage = torch.transpose(advantage,0,1)
             for i in range(state_batch.shape[0]):              
                 actor_predict[i] = self.actor(state_batch[i,1:4])
@@ -259,7 +262,7 @@ critic_arr = []
 score_arr = []            
         
 for episode in range(1, episodes+1):
-    ini_state = env.reset()    
+    ini_state, _ = env.reset()    
     done = False
     score = 0 
     
@@ -268,7 +271,7 @@ for episode in range(1, episodes+1):
         
         converted_state = PPO_agent.convert_data(ini_state)
         action, prob, vals = PPO_agent.pick_action(converted_state)
-        n_state, reward, done, info = env.step(action)
+        n_state, reward, done, info, _ = env.step(action)
         score+=reward
         PPO_agent.remember(ini_state, reward, action, prob, vals)
         ini_state = n_state
@@ -280,3 +283,13 @@ for episode in range(1, episodes+1):
     
     print('Episode:{} Score:{}'.format(episode, score))
 env.close()
+plt.figure()
+plt.title("Actor Loss")
+plt.plot(np.arange(episodes), actor_arr)
+plt.figure()
+plt.title("Critic Loss")
+plt.semilogy(np.arange(episodes), critic_arr)
+plt.figure()
+plt.title("Score")
+plt.semilogy(np.arange(episodes), score_arr)
+plt.show()
