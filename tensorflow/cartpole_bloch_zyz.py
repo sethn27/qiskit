@@ -28,12 +28,12 @@ import sympy
 
 import numpy as np
 import matplotlib.pyplot as plt
-from qiskit.circuit import QuantumCircuit, Parameter
-from qiskit.circuit import ParameterVector
+# from qiskit.circuit import QuantumCircuit, Parameter
+# from qiskit.circuit import ParameterVector
 
-# to each circuit, and plot them on the Bloch sphere:
-from qiskit.visualization.bloch import Bloch
-from qiskit.quantum_info import Statevector
+# # to each circuit, and plot them on the Bloch sphere:
+# from qiskit.visualization.bloch import Bloch
+# from qiskit.quantum_info import Statevector
 
 
 
@@ -210,68 +210,9 @@ class PPO_agent(object):
         self.iter = 0
         return train_param
 
-import numpy as np
-import matplotlib.pyplot as plt
-from qiskit.circuit import QuantumCircuit, Parameter
-from qiskit.circuit import ParameterVector
-
-# to each circuit, and plot them on the Bloch sphere:
-from qiskit.visualization.bloch import Bloch
-from qiskit.quantum_info import Statevector
-from qiskit.visualization import plot_state_qsphere, plot_bloch_multivector
 
 if __name__ == '__main__':
-    
-
-    # First, we need to define the circuits:
-    theta_param = Parameter('θ')
-    phi_param = Parameter('Φ')
-    beta1_param = Parameter('b1')
-    beta2_param = Parameter('b2')
-    beta3_param = Parameter('b3')
-    beta4_param = Parameter('b4')
-
-    #CHANGE GATES HERE
-    # Circuit A
-    qc_A = QuantumCircuit(1)
-    qc_A.h(0)
-
-    qc_A.rz(beta1_param, 0)
-    qc_A.ry(beta2_param, 0)
-    qc_A.rz(beta3_param, 0)
-    # Circuit B
-    qc_B = QuantumCircuit(1)
-    qc_B.h(0)
-
-    qc_B.rz(beta1_param, 0)
-    qc_B.ry(beta2_param, 0)
-    qc_B.rz(beta3_param, 0)
-
-    qc_B.rx(theta_param, 0)
-
-    # Bloch sphere plot formatting
-    
-    b1 = Bloch()
-    b2 = Bloch()
-    b1.point_color = ['tab:blue']
-    b2.point_color = ['tab:blue']
-    b1.point_marker = ['o']
-    b2.point_marker = ['o']
-    b1.point_size=[2]
-    b2.point_size=[2]
-    
-
-    def state_to_bloch(state_vec):
-    # Converts state vectors to points on the Bloch sphere
-      phi = np.angle(state_vec.data[1])-np.angle(state_vec.data[0])
-      theta = 2*np.arccos(np.abs(state_vec.data[0]))
-      return [np.sin(theta)*np.cos(phi),np.sin(theta)*np.sin(phi),np.cos(theta)]
-
-    obs1 = []
-    obs2 = []
-    obs3 = []
-
-    ITERATIONS = 150
+    ITERATIONS = 300
     windows = 20
     env = random.seed(34)
 
@@ -287,54 +228,14 @@ if __name__ == '__main__':
         s1 = env.reset()
         episode_reward = 0
         done = False
-
-
-        # Bloch sphere plot formatting   
-        b1 = Bloch()
-        b2 = Bloch()
-        b1.point_color = ['tab:blue']
-        b2.point_color = ['tab:blue']
-        b1.point_marker = ['o']
-        b2.point_marker = ['o']
-        b1.point_size=[2]
-        b2.point_size=[2]
-
-
         while not done:
             # env.render()
-
-            obs1.append(math.atan(s1[1]))
-            obs2.append(math.atan(s1[2]))
-            obs3.append(math.atan(s1[3]))
-                           
-
             action, p = agent.get_action(s1)
             s2, reward, done, info = env.step(action)
             episode_reward += reward
             agent.remember(s1, reward, action, p)
             s1 = s2
-
-
-        #agent.train()
-
-        for e in range(len(obs1)):  
-            state_1=Statevector.from_instruction(qc_A.bind_parameters({beta1_param:obs1[e], beta2_param:obs2[e], beta3_param:obs3[e]}))          
-            b1.add_points(state_to_bloch(state_1))            
-        b1.show()
-        
-        
-        para_raw = agent.train()
-
-        #Trainable Param
-        para = para_raw[0].numpy()[0] 
-        print("Trainable parameter:", para)
-
-        for n in range(len(obs1)):        
-          state_2=Statevector.from_instruction(qc_B.bind_parameters({beta1_param:obs1[n], beta2_param:obs2[n], beta3_param:obs3[n], theta_param:para})) 
-          b2.add_points(state_to_bloch(state_2))
-        b2.show()
-
-
+        agent.train()
         plot_rewards.append(episode_reward)
         rs.append(episode_reward)
         avg = np.mean(rs)
@@ -349,13 +250,162 @@ if __name__ == '__main__':
                                                                                                                   avg,
                                                                                                                   episode_reward),
               )
-    print(b1)
-    np.save("VQC PPO HRyRyRz Rx measurement 32 1qubits  (lr=0.004) rewards", np.asarray(plot_rewards))
 
-    plt.title("VQC PPO HRzRyRz Rx  ")
+    np.save("VQC PPO HRzRyRz Rx measurement 32 1qubits  (lr=0.004) rewards", np.asarray(plot_rewards))
+
+    plt.title("VQC PPO HRzRyRz Rx measurement 32 1qubits  (lr=0.004) ")
     plt.plot(plot_rewards, label='Reward')
     plt.plot(avg_reward, label='Average')
     plt.legend()
     plt.ylabel('Reward')
     plt.xlabel('Iteration')
     plt.show()
+# import numpy as np
+# import matplotlib.pyplot as plt
+# from qiskit.circuit import QuantumCircuit, Parameter
+# from qiskit.circuit import ParameterVector
+
+# # to each circuit, and plot them on the Bloch sphere:
+# from qiskit.visualization.bloch import Bloch
+# from qiskit.quantum_info import Statevector
+# from qiskit.visualization import plot_state_qsphere, plot_bloch_multivector
+
+# if __name__ == '__main__':
+    
+
+#     # First, we need to define the circuits:
+#     theta_param = Parameter('θ')
+#     phi_param = Parameter('Φ')
+#     beta1_param = Parameter('b1')
+#     beta2_param = Parameter('b2')
+#     beta3_param = Parameter('b3')
+#     beta4_param = Parameter('b4')
+
+#     #CHANGE GATES HERE
+#     # Circuit A
+#     qc_A = QuantumCircuit(1)
+#     qc_A.h(0)
+
+#     qc_A.rz(beta1_param, 0)
+#     qc_A.ry(beta2_param, 0)
+#     qc_A.rz(beta3_param, 0)
+#     # Circuit B
+#     qc_B = QuantumCircuit(1)
+#     qc_B.h(0)
+
+#     qc_B.rz(beta1_param, 0)
+#     qc_B.ry(beta2_param, 0)
+#     qc_B.rz(beta3_param, 0)
+
+#     qc_B.rx(theta_param, 0)
+
+#     # Bloch sphere plot formatting
+    
+#     b1 = Bloch()
+#     b2 = Bloch()
+#     b1.point_color = ['tab:blue']
+#     b2.point_color = ['tab:blue']
+#     b1.point_marker = ['o']
+#     b2.point_marker = ['o']
+#     b1.point_size=[2]
+#     b2.point_size=[2]
+    
+
+#     def state_to_bloch(state_vec):
+#     # Converts state vectors to points on the Bloch sphere
+#       phi = np.angle(state_vec.data[1])-np.angle(state_vec.data[0])
+#       theta = 2*np.arccos(np.abs(state_vec.data[0]))
+#       return [np.sin(theta)*np.cos(phi),np.sin(theta)*np.sin(phi),np.cos(theta)]
+
+#     obs1 = []
+#     obs2 = []
+#     obs3 = []
+
+#     ITERATIONS = 150
+#     windows = 20
+#     env = random.seed(34)
+
+#     env = gym.make("CartPole-v1")
+#     '''env.observation_space.shape'''
+#     agent = PPO_agent(env.action_space.n, env.observation_space.shape)
+#     plot_rewards = []
+#     avg_reward = deque(maxlen=ITERATIONS)
+#     best_avg_reward = -math.inf
+#     rs = deque(maxlen=windows)
+
+#     for i in range(ITERATIONS):
+#         s1 = env.reset()
+#         episode_reward = 0
+#         done = False
+
+
+#         # Bloch sphere plot formatting   
+#         b1 = Bloch()
+#         b2 = Bloch()
+#         b1.point_color = ['tab:blue']
+#         b2.point_color = ['tab:blue']
+#         b1.point_marker = ['o']
+#         b2.point_marker = ['o']
+#         b1.point_size=[2]
+#         b2.point_size=[2]
+
+
+#         while not done:
+#             # env.render()
+
+#             obs1.append(math.atan(s1[1]))
+#             obs2.append(math.atan(s1[2]))
+#             obs3.append(math.atan(s1[3]))
+                           
+
+#             action, p = agent.get_action(s1)
+#             s2, reward, done, info = env.step(action)
+#             episode_reward += reward
+#             agent.remember(s1, reward, action, p)
+#             s1 = s2
+
+
+#         #agent.train()
+
+#         for e in range(len(obs1)):  
+#             state_1=Statevector.from_instruction(qc_A.bind_parameters({beta1_param:obs1[e], beta2_param:obs2[e], beta3_param:obs3[e]}))          
+#             b1.add_points(state_to_bloch(state_1))            
+#         b1.show()
+        
+        
+#         para_raw = agent.train()
+
+#         #Trainable Param
+#         para = para_raw[0].numpy()[0] 
+#         print("Trainable parameter:", para)
+
+#         for n in range(len(obs1)):        
+#           state_2=Statevector.from_instruction(qc_B.bind_parameters({beta1_param:obs1[n], beta2_param:obs2[n], beta3_param:obs3[n], theta_param:para})) 
+#           b2.add_points(state_to_bloch(state_2))
+#         b2.show()
+
+
+#         plot_rewards.append(episode_reward)
+#         rs.append(episode_reward)
+#         avg = np.mean(rs)
+#         avg_reward.append(avg)
+#         if i >= windows:
+#             if avg > best_avg_reward:
+#                 best_avg_reward = avg
+
+#         print("\rEpisode {}/{} || Best average reward {}, Current Average {}, Current Iteration Reward {}".format(i,
+#                                                                                                                   ITERATIONS,
+#                                                                                                                   best_avg_reward,
+#                                                                                                                   avg,
+#                                                                                                                   episode_reward),
+#               )
+#     print(b1)
+#     np.save("VQC PPO HRyRyRz Rx measurement 32 1qubits  (lr=0.004) rewards", np.asarray(plot_rewards))
+
+#     plt.title("VQC PPO HRzRyRz Rx  ")
+#     plt.plot(plot_rewards, label='Reward')
+#     plt.plot(avg_reward, label='Average')
+#     plt.legend()
+#     plt.ylabel('Reward')
+#     plt.xlabel('Iteration')
+#     plt.show()
