@@ -26,7 +26,7 @@ from qiskit_machine_learning.neural_networks import EstimatorQNN
 from qiskit_machine_learning.connectors import TorchConnector
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+print("Hello world")
 class HybridActorNetwork(nn.Module):
     def __init__(self,
                  state_space,
