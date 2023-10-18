@@ -304,6 +304,7 @@ for current_episode in range(0, number_of_episodes):
     score.append(episodic_score)
     actor_loss.append(episodic_actor_loss)
     critic_loss.append(episodic_critic_loss)
+    print("new line")
     print('Episode:{} Score:{} Actor_Loss:{} Critic_Loss:{}'.format(current_episode,
                                                                     episodic_score,
                                                                     episodic_actor_loss,
