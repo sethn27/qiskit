@@ -288,7 +288,7 @@ average_score = []
 average_actor_loss = []
 average_critic_loss = []
 
-# First, we need to define the circuits:
+# Prepare quantum circuit for plotting here:
 theta_param = Parameter('θ')
 phi_param =   Parameter('Φ')
 beta1_param = Parameter('b1')
@@ -381,6 +381,13 @@ for current_episode in range(0, number_of_episodes):
     next_state = torch.FloatTensor(next_state).to(device)
     next_state_value = Critic(next_state)
     #print(next_state_value)
+    
+    #Show Encoded states on Bloch sphere    
+    # for e in range(len(obs1)):  
+    #     state_1=Statevector.from_instruction(qc_A.bind_parameters({beta1_param:obs1[e], beta2_param:obs2[e], beta3_param:obs3[e]}))          
+    #     b1.add_points(state_to_bloch(state_1))            
+    # b1.show()
+
     episodic_actor_loss, episodic_critic_loss, param = Agent.training(next_state_value = next_state_value)
 
     score.append(episodic_score)
@@ -391,7 +398,7 @@ for current_episode in range(0, number_of_episodes):
                                                                     episodic_actor_loss,
                                                                     episodic_critic_loss))
     
-    #Show states with parameter theta
+    #Show encoded states with parameter theta
     for n in range(len(obs1)):        
       state_2=Statevector.from_instruction(qc_B.bind_parameters({beta1_param:obs1[n], beta2_param:obs2[n], beta3_param:obs3[n], theta_param:param})) 
       b2.add_points(state_to_bloch(state_2))
@@ -425,7 +432,7 @@ plt.plot(np.array(list(range(0, len(critic_loss), constant_for_average))), avera
 plt.legend()
 plt.show()
 
-
+#Compile the Bloch images into a folder
 for i in range(len(image_array)):
     filename = "bloch_" + str(i) + ".jpg"
     image_array[i].save('C:/Users/a1812176/Box/Code/Python Scripts/Pytorch script/qiskit-main/Qiskit/temp/' + filename )
