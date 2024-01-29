@@ -30,7 +30,7 @@ from qiskit.quantum_info import Statevector
 from qiskit.visualization import plot_state_qsphere, plot_bloch_multivector
 
 from CNN_Agent_3_action import ActorNetwork, CriticNetwork, Classical_Agent
-from Physical_Enviroment_V3_3_actions import Inverted_Pendulum_Enviroment
+from Physical_Enviroment_V4 import Inverted_Pendulum_Enviroment
 import serial.tools.list_ports
 
 #Serial
@@ -64,64 +64,9 @@ pwm = board.get_pin('d:3:p') #Motor PWM (Speed)
 brake = board.get_pin('d:9:o') #Motor brake
 direction = board.get_pin('d:12:o') #Motor direction
 
-a_channel_pin_number = board.get_pin('d:5:u') #A phase of motor encoder
-b_channel_pin_number = board.get_pin('d:6:u') #B phase of motor encoder
-
-#a_chan = board.get_pin('a:4:i')
-#b_chan = board.get_pin('a:5:i')
 #Create training environment
-PEN_ENV = Inverted_Pendulum_Enviroment(analog_input, direction, pwm, a_channel_pin_number, b_channel_pin_number)
-class pulse_calculator():
-    def __innit__(self):
-        self.pulse=0
+PEN_ENV = Inverted_Pendulum_Enviroment(analog_input, direction, pwm)
 
-    def add_pulse(self, count):
-        
-        self.pulse = round(self.pulse + count,2)
-        return pulse
-    
-    def reduce_pulse(self, count):
-        self.pulse = round(self.pulse - count,2)
-        return pulse
-    
-pulse_cal = pulse_calculator()  
-pulse_cal.pulse = 0
-  
-def A_change(pulse): # #Interrupt A phase on encoder
-       
-    if  b_channel_pin_number.read() == 0:
-        if a_channel_pin_number.read() == 0:
-            pulse_cal.reduce_pulse( 0.01) 
-        else:
-            pulse_cal.add_pulse(0.01)
-
-#     else:
-#         if a_channel_pin_number.read() == 0:
-#             pulse_cal.add_pulse(0.01)
-#         else:
-#             pulse_cal.reduce_pulse( 0.01)
-    
-
-# def B_change(pulse2): #Interrupt B phase on encoder
-    
-#     if  a_channel_pin_number.read() == 0:
-#         if b_channel_pin_number.read() == 0:
-#             pulse_cal.add_pulse(0.01)
-#         else:
-#             pulse_cal.reduce_pulse( 0.01)
-
-#     else:
-#         if b_channel_pin_number.read() == 0:
-            
-#             pulse_cal.reduce_pulse( 0.01)
-#         else:
-#             pulse_cal.add_pulse(0.01)  
-            
-#Register callback function for encoder phases
-a_channel_pin_number.register_callback(A_change)
-a_channel_pin_number.enable_reporting()
-# b_channel_pin_number.register_callback(B_change)
-# b_channel_pin_number.enable_reporting()
 
 
 #Model params
@@ -130,12 +75,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 state_space = 4
 action_space = 3
 
-actor_learning_rate = 0.0005
-critic_learning_rate = 0.005
+actor_learning_rate = 0.0005 #0.0005
+critic_learning_rate = 0.005 #0.005
 
-max_time_steps = 200
+max_time_steps = 1000
 number_of_epochs = 1
-number_of_episodes = 5000
+number_of_episodes = 3500
 discount_factor = 0.99
 constant_for_average = 10
 reward_count = 0
@@ -164,8 +109,9 @@ average_score = []
 average_actor_loss = []
 average_critic_loss = []
 
-
-
+# while True:
+#     print(PEN_ENV.calculate_angle())
+#     time.sleep(0.1)
     
 for current_episode in range(0, number_of_episodes):
     Agent.clear_memory()
@@ -183,8 +129,11 @@ for current_episode in range(0, number_of_episodes):
     
     #Bring pendulum back    
     print("Cart pos is: ", cart_pos) #Encoder ticks
-    while (cart_pos>50 or cart_pos<-50):
-     
+    while (cart_pos>10 or cart_pos<-10):
+        
+        if serialInst.in_waiting>10:
+            serialInst.flushInput()
+            
         brake.write(0)
         if cart_pos>10:
             direction.write(1)
@@ -193,10 +142,8 @@ for current_episode in range(0, number_of_episodes):
             direction.write(0)
             pwm.write(0.5)
             
-        if serialInst.in_waiting>10:
-            serialInst.flushInput()
             
-        time.sleep(0.05)    
+        time.sleep(0.01)    
         brake.write(1)        
         pwm.write(0)
         
@@ -204,15 +151,29 @@ for current_episode in range(0, number_of_episodes):
             packet = serialInst.readline()
             #print(packet.decode('utf').rstrip('\n'))
             cart_pos = int(packet.decode('utf').rstrip('\n'))
+            
+    if serialInst.in_waiting>10:
+        serialInst.flushInput()
         
+    brake.write(1)        
+    pwm.write(0)
+    time.sleep(0.05)
+    
+    if serialInst.in_waiting:
+        packet = serialInst.readline()
+        #print(packet.decode('utf').rstrip('\n'))
+        cart_pos = int(packet.decode('utf').rstrip('\n'))
     print("5 sec wait")
     print("Cart pos is: ", cart_pos) #Encoder ticks
     time.sleep(5)
-    pulse_cal.pulse = 0
-    current_state = PEN_ENV.reset()
-    action_arr = []
+    
+    
     if serialInst.in_waiting>10:
         serialInst.flushInput()
+        
+    current_state = PEN_ENV.reset()
+    current_state.append(cart_pos/100)
+    action_arr = []
         
     for timestep_count in range(0, max_time_steps):
         start = time.time()
@@ -223,7 +184,7 @@ for current_episode in range(0, number_of_episodes):
         state_value = Critic(current_state)
         
         brake.write(0)
-        #PEN_ENV.take_action(action)
+        print(action)
         
         
         if serialInst.in_waiting:
@@ -231,14 +192,14 @@ for current_episode in range(0, number_of_episodes):
             #print(packet.decode('utf').rstrip('\n'))
             cart_pos = float(packet.decode('utf').rstrip('\n'))
             
-        next_state, reward_count, done = PEN_ENV.step(action, length_timestep, cart_pos)
+        next_state, reward_count, done = PEN_ENV.step(action, cart_pos)
 
         if serialInst.in_waiting:
             packet = serialInst.readline()
             #print(packet.decode('utf').rstrip('\n'))
             cart_pos = float(packet.decode('utf').rstrip('\n'))
 
-        next_state.append(cart_pos)
+        next_state.append(cart_pos/100)
         
         Agent.replay_memory(reward = reward_count,
                             policy = policy,
@@ -272,18 +233,28 @@ for current_episode in range(0, number_of_episodes):
     next_state_value = Critic(next_state)
     episodic_actor_loss, episodic_critic_loss = Agent.training(next_state_value = next_state_value)
     
+    if episodic_score >= 20:
+        torch.save(Actor, 'actor.pkl')
+        torch.save(Critic, 'critic.pkl')
     score.append(episodic_score)
     actor_loss.append(episodic_actor_loss)
     critic_loss.append(episodic_critic_loss)
     plt.plot(actor_loss)
     plt.show()
+    plt.plot(score)
+    plt.show()
+    
+    
     print('Episode:{} Score:{} Actor_Loss:{} Critic_Loss:{}'.format(current_episode,
                                                                     episodic_score,
                                                                     episodic_actor_loss,
                                                                     episodic_critic_loss))
     
-    
-    
+
+np.savetxt('Actor.txt', actor_loss)
+np.savetxt('Score.txt', score)
+np.savetxt('Critic.txt', critic_loss)
+
     
     
     
