@@ -48,7 +48,7 @@ class Inverted_Pendulum_Enviroment():
             angle = round((analog_value * 1024) * (2 * mt.pi/1024), 4)
             angle = round(angle, 4)
             if angle > mt.pi:
-                angle = round(2*mt.pi - angle, 4)
+                angle = round( angle - 2*(mt.pi), 4)
         else:
             angle = 0
         return angle
@@ -59,7 +59,14 @@ class Inverted_Pendulum_Enviroment():
         
         self.current_state[0] = mt.sin(self.current_state[3])
         self.current_state[1] = mt.cos(self.current_state[3])
-        self.current_state[2] = (self.current_state[3] - self.previous_state[3])/self.timestep_length
+        
+        diff = (self.current_state[3] - self.previous_state[3])
+        if (diff > 5):
+            self.current_state[2] = ((mt.pi - self.previous_state[3]) + (mt.pi + self.current_state[3]))/self.timestep_length
+        elif (diff < -5):   
+            self.current_state[2] = ((mt.pi + self.previous_state[3]) + (mt.pi - self.current_state[3]))/self.timestep_length
+        else:
+            self.current_state[2] = (self.current_state[3] - self.previous_state[3])/self.timestep_length
         self.previous_state[3] = self.current_state[3]
     
     def step(self, 
@@ -74,16 +81,20 @@ class Inverted_Pendulum_Enviroment():
 
         self.observe_state()
         
-        termination = bool(current_pulse < -self.position_threshold
-                           or current_pulse > self.position_threshold)
+        termination = bool(current_pulse < -(self.position_threshold)
+                           or current_pulse > self.position_threshold
+                           or self.current_state[2] > 10
+                           or self.current_state[2] <-10)
         if not termination:
-             reward = -(self.current_state[3]**2 + 0.1 * self.current_state[2]**2 + 0.001 * action**2)
-
+             #reward = -((mt.pi - self.current_state[3])**2 + 0.1 * self.current_state[2]**2 + 0.001 * action**2)
+             reward = 1/2 * (1 - self.current_state[1]) - (current_pulse/800)**2
+             print(reward)
         else:
-             reward = -100
-             self.take_action(0)
-             termination = False
-             self.observe_state()
+            print('termm')
+            reward = -500
+            # self.take_action(0)
+            # termination = False
+            # self.observe_state()
 
         return self.current_state[0:3], reward, termination
     
